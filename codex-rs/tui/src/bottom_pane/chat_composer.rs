@@ -972,7 +972,10 @@ impl ChatComposer {
                 }
                 let mut text = self.textarea.text().to_string();
                 let original_input = text.clone();
-                let input_starts_with_space = original_input.starts_with(' ');
+                let input_starts_with_whitespace = original_input
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace);
                 self.textarea.set_text("");
 
                 // Replace all pending pastes in the text
@@ -987,7 +990,7 @@ impl ChatComposer {
                 let has_attachments = !self.attached_images.is_empty();
                 text = text.trim().to_string();
                 if let Some((name, _rest)) = parse_slash_name(&text) {
-                    let treat_as_plain_text = input_starts_with_space || name.contains('/');
+                    let treat_as_plain_text = input_starts_with_whitespace || name.contains('/');
                     if !treat_as_plain_text {
                         let is_builtin = built_in_slash_commands()
                             .into_iter()
@@ -2971,6 +2974,74 @@ mod tests {
 
         if let InputResult::Submitted(text) = result {
             assert_eq!(text, "/Users/example/project/src/main.rs");
+        } else {
+            panic!("expected Submitted");
+        }
+        assert!(composer.textarea.is_empty());
+        match rx.try_recv() {
+            Ok(event) => panic!("unexpected event: {event:?}"),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Err(err) => panic!("unexpected channel state: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn newline_then_text_submits_as_text() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+
+        composer.textarea.set_text("\nhello world");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        if let InputResult::Submitted(text) = result {
+            assert_eq!(text, "hello world");
+        } else {
+            panic!("expected Submitted");
+        }
+        assert!(composer.textarea.is_empty());
+        match rx.try_recv() {
+            Ok(event) => panic!("unexpected event: {event:?}"),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Err(err) => panic!("unexpected channel state: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn newline_then_slash_submits_as_text() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+
+        composer.textarea.set_text("\n/this-looks-like-a-command");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        if let InputResult::Submitted(text) = result {
+            assert_eq!(text, "/this-looks-like-a-command");
         } else {
             panic!("expected Submitted");
         }
